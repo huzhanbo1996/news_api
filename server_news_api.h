@@ -16,10 +16,6 @@ class ServerNewsApi {
   static void StopWaitGroup(int signal);
   static void Process(WFHttpTask* server_task);
 
-  struct RequestData {
-    std::vector<HrefItem>& items;
-    size_t idx;
-  };
   static void* RequestEvaluation(void *data);
 
   int port_;

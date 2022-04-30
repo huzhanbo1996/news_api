@@ -31,18 +31,16 @@ void ServerNewsApi::Run(int port) {
 
 void ServerNewsApi::StopWaitGroup(int signal) { global_wait_group_.done(); }
 
-void* ServerNewsApi::RequestEvaluation(void *data)
-{
-  RequestData* request_data = (RequestData *)data;
-  auto &news_with_link = request_data->items[request_data->idx];
+void *ServerNewsApi::RequestEvaluation(void *data) {
+  HrefItem *news_with_link = (HrefItem *)data;
   const auto &evaluation_json =
-      Utils::HttpReqSync("http://baobianapi.pullword.com:9091/get.php",
-                          "POST", news_with_link.title.c_str());
+      Utils::HttpReqSync("http://baobianapi.pullword.com:9091/get.php", "POST",
+                         news_with_link->title.c_str());
   rapidjson::Document document;
   document.Parse(evaluation_json.c_str());
   if (document.IsObject() && document.HasMember("result") &&
       document["result"].IsFloat()) {
-    news_with_link.positive_evaluation = document["result"].GetFloat();
+    news_with_link->positive_evaluation = document["result"].GetFloat();
   }
   return nullptr;
 }
@@ -58,19 +56,17 @@ void ServerNewsApi::Process(WFHttpTask *server_task) {
   auto news_with_link_vec = Utils::FindItemUnderClass(html, news_classe_names);
 
   // get their positive evaluation via baobianapi.pullword.com
-  RequestData data{news_with_link_vec, 0};
   std::vector<pthread_t> threads_id(news_with_link_vec.size());
   for (size_t i = 0; i < news_with_link_vec.size(); ++i) {
     pthread_t threadId;
-    pthread_create(&threadId, NULL, &RequestEvaluation, &data);
+    pthread_create(&threadId, NULL, &RequestEvaluation, &news_with_link_vec[i]);
     threads_id[i] = threadId;
-    data.idx++;
   }
 
   for (size_t i = 0; i < news_with_link_vec.size(); ++i) {
     pthread_join(threads_id[i], NULL);
   }
-  
+
   // make body json
   rapidjson::Document response_document;
   response_document.SetArray();
@@ -113,5 +109,4 @@ void ServerNewsApi::Process(WFHttpTask *server_task) {
 
   // no more than 10 requests on the same connection
   if (seq == 9) resp->add_header_pair("Connection", "close");
-
 }
