@@ -11,7 +11,7 @@
 WFFacilities::WaitGroup ServerNewsApi::global_wait_group_(1);
 
 const std::vector<std::string> ServerNewsApi::news_classe_names{
-    "hotnews", "ulist focuslistnews"};
+    "hotnews", "ulist focuslistnews", "ulist"};
 
 void ServerNewsApi::Run(int port) {
   port_ = port;
@@ -31,6 +31,21 @@ void ServerNewsApi::Run(int port) {
 
 void ServerNewsApi::StopWaitGroup(int signal) { global_wait_group_.done(); }
 
+void* ServerNewsApi::RequestEvaluation(void *data)
+{
+  RequestData* request_data = (RequestData *)data;
+  auto &news_with_link = request_data->items[request_data->idx];
+  const auto &evaluation_json =
+      Utils::HttpReqSync("http://baobianapi.pullword.com:9091/get.php",
+                          "POST", news_with_link.title.c_str());
+  rapidjson::Document document;
+  document.Parse(evaluation_json.c_str());
+  if (document.IsObject() && document.HasMember("result") &&
+      document["result"].IsFloat()) {
+    news_with_link.positive_evaluation = document["result"].GetFloat();
+  }
+  return nullptr;
+}
 void ServerNewsApi::Process(WFHttpTask *server_task) {
   protocol::HttpRequest *req = server_task->get_req();
   protocol::HttpResponse *resp = server_task->get_resp();
@@ -43,18 +58,19 @@ void ServerNewsApi::Process(WFHttpTask *server_task) {
   auto news_with_link_vec = Utils::FindItemUnderClass(html, news_classe_names);
 
   // get their positive evaluation via baobianapi.pullword.com
-  for (auto &news_with_link : news_with_link_vec) {
-    const auto &evaluation_json =
-        Utils::HttpReqSync("http://baobianapi.pullword.com:9091/get.php",
-                           "POST", news_with_link.title.c_str());
-    rapidjson::Document document;
-    document.Parse(evaluation_json.c_str());
-    if (document.IsObject() && document.HasMember("result") &&
-        document["result"].IsFloat()) {
-      news_with_link.positive_evaluation = document["result"].GetFloat();
-    }
+  RequestData data{news_with_link_vec, 0};
+  std::vector<pthread_t> threads_id(news_with_link_vec.size());
+  for (size_t i = 0; i < news_with_link_vec.size(); ++i) {
+    pthread_t threadId;
+    pthread_create(&threadId, NULL, &RequestEvaluation, &data);
+    threads_id[i] = threadId;
+    data.idx++;
   }
 
+  for (size_t i = 0; i < news_with_link_vec.size(); ++i) {
+    pthread_join(threads_id[i], NULL);
+  }
+  
   // make body json
   rapidjson::Document response_document;
   response_document.SetArray();
